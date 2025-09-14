@@ -14,7 +14,7 @@ interface LoanApplication {
   bankBranch: string
   description: string
   department: string
-  status: "pending" | "approved" | "rejected" | "disbursed"
+  status: "pending" | "approved" | "rejected" | "sanctioned" | "disbursed"
   submittedAt: string
   adminAction?: {
     action: "approved" | "rejected"
@@ -38,37 +38,53 @@ export function DepartmentApplications({ user }: DepartmentApplicationsProps) {
   useEffect(() => {
     const fetchApplications = async () => {
       try {
-        const response = await fetch('/api/applications')
-        if (response.ok) {
-          const data = await response.json()
-          console.log('DEBUG - API response:', data)
-          console.log('DEBUG - User info:', user)
-          // Transform API data to match component interface
-          const transformedApplications = data.applications.map((app: any) => ({
-            id: app._id,
-            loanType: app.type || app.loanType, // support both legacy and current field names
-            applicantName: app.applicantName,
-            address: app.address,
-            bankBranch: app.branchName || app.branchId || 'Unknown Branch',
-            description: app.description,
-            department: app.departmentName || app.department || 'Unknown Department',
-            status: app.status === 'submitted' ? 'pending' : app.status, // UI normalizes backend 'submitted' to 'pending'
-            submittedAt: app.createdAt,
-            adminAction: app.history?.find((h: any) => h.action === 'approved' || h.action === 'rejected') ? {
-              action: app.history.find((h: any) => h.action === 'approved' || h.action === 'rejected').action,
-              timestamp: app.history.find((h: any) => h.action === 'approved' || h.action === 'rejected').at
-            } : undefined,
-            branchAction: app.history?.find((h: any) => h.action === 'disbursed') ? {
-              action: 'disbursed',
-              timestamp: app.history.find((h: any) => h.action === 'disbursed').at,
-              disbursedBy: app.history.find((h: any) => h.action === 'disbursed').by
-            } : undefined
-          }))
-          
+        const [appsRes, branchesRes, banksRes] = await Promise.all([
+          fetch('/api/applications'),
+          fetch('/api/branches'),
+          fetch('/api/banks')
+        ])
+
+        let branchMap: Record<string, any> = {}
+        let bankMap: Record<string, any> = {}
+        if (branchesRes.ok) {
+          const brData = await branchesRes.json()
+          brData.branches?.forEach((b: any) => { branchMap[b._id] = b })
+        }
+        if (banksRes.ok) {
+          const bkData = await banksRes.json()
+          bkData.banks?.forEach((b: any) => { bankMap[b._id] = b })
+        }
+
+        if (appsRes.ok) {
+          const data = await appsRes.json()
+          const transformedApplications = data.applications.map((app: any) => {
+            const branch = branchMap[app.branchId]
+            const bank = branch ? bankMap[branch.bankId] : undefined
+            const branchDisplay = branch ? `${bank?.name || 'Unknown Bank'} - ${branch.name || branch.code || branch._id}` : (app.branchName || app.branchId || 'Unknown Branch')
+            return {
+              id: app._id,
+              loanType: app.type || app.loanType,
+              applicantName: app.applicantName,
+              address: app.address,
+              bankBranch: branchDisplay,
+              description: app.description,
+              department: app.departmentName || app.department || 'Unknown Department',
+              status: app.status === 'submitted' ? 'pending' : app.status,
+              submittedAt: app.createdAt,
+              adminAction: app.history?.find((h: any) => h.action === 'approved' || h.action === 'rejected') ? {
+                action: app.history.find((h: any) => h.action === 'approved' || h.action === 'rejected').action,
+                timestamp: app.history.find((h: any) => h.action === 'approved' || h.action === 'rejected').at
+              } : undefined,
+              branchAction: app.history?.find((h: any) => h.action === 'disbursed') ? {
+                action: 'disbursed',
+                timestamp: app.history.find((h: any) => h.action === 'disbursed').at,
+                disbursedBy: app.history.find((h: any) => h.action === 'disbursed').by
+              } : undefined
+            }
+          })
           setApplications(transformedApplications)
         } else {
-          console.error('Failed to fetch applications:', response.statusText)
-          // Fallback to localStorage if API fails
+          console.error('Failed to fetch applications:', appsRes.statusText)
           const savedApplications = localStorage.getItem("loanApplications")
           if (savedApplications) {
             const allApplications: LoanApplication[] = JSON.parse(savedApplications)
@@ -78,7 +94,6 @@ export function DepartmentApplications({ user }: DepartmentApplicationsProps) {
         }
       } catch (error) {
         console.error('Error fetching applications:', error)
-        // Fallback to localStorage if API fails
         const savedApplications = localStorage.getItem("loanApplications")
         if (savedApplications) {
           const allApplications: LoanApplication[] = JSON.parse(savedApplications)
@@ -88,7 +103,6 @@ export function DepartmentApplications({ user }: DepartmentApplicationsProps) {
       }
       setIsLoading(false)
     }
-
     fetchApplications()
   }, [user.department, user.departmentId])
 
@@ -105,7 +119,14 @@ export function DepartmentApplications({ user }: DepartmentApplicationsProps) {
         return (
           <Badge variant="secondary" className="bg-green-100 text-green-800">
             <CheckCircle className="w-3 h-3 mr-1" />
-            Approved - Awaiting Disbursement
+            Approved - Awaiting Sanction
+          </Badge>
+        )
+      case "sanctioned":
+        return (
+          <Badge variant="secondary" className="bg-purple-100 text-purple-800">
+            <CheckCircle className="w-3 h-3 mr-1" />
+            Sanctioned - Awaiting Disbursement
           </Badge>
         )
       case "rejected":
@@ -159,12 +180,14 @@ export function DepartmentApplications({ user }: DepartmentApplicationsProps) {
   const pendingCount = applications.filter((app) => app.status === "pending").length
   const approvedCount = applications.filter((app) => app.status === "approved").length
   const rejectedCount = applications.filter((app) => app.status === "rejected").length
+  const sanctionedCount = applications.filter((app) => app.status === "sanctioned").length
   const disbursedCount = applications.filter((app) => app.status === "disbursed").length
 
   return (
     <div className="space-y-6">
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+      <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-thin" style={{ WebkitOverflowScrolling: 'touch' }}>
+        {/* Each card given min-width to align horizontally */}
         <Card>
           <CardContent className="pt-6">
             <div className="text-2xl font-bold">{applications.length}</div>
@@ -181,6 +204,12 @@ export function DepartmentApplications({ user }: DepartmentApplicationsProps) {
           <CardContent className="pt-6">
             <div className="text-2xl font-bold text-green-600">{approvedCount}</div>
             <p className="text-xs text-muted-foreground">Approved</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="text-2xl font-bold text-purple-600">{sanctionedCount}</div>
+            <p className="text-xs text-muted-foreground">Sanctioned</p>
           </CardContent>
         </Card>
         <Card>

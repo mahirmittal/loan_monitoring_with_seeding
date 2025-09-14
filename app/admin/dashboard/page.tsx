@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { AdminApplicationsList } from "@/components/admin-applications-list"
+import { AdminDepartmentSummary } from "@/components/admin-department-summary"
 import { BankManagement } from "@/components/bank-management"
 import { DepartmentManagement } from "@/components/department-management"
 import { GovernmentHeader } from "@/components/government-header"
@@ -79,8 +80,12 @@ export default function AdminDashboardPage() {
             <TabsTrigger value="departments">Department Management</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="applications">
-            <AdminApplicationsList />
+          <TabsContent value="applications" className="space-y-10">
+            <AdminDepartmentSummary />
+            <div>
+              <h2 className="text-lg font-semibold mb-3">All Applications</h2>
+              <AdminApplicationsList showSummary={false} showFilters={true} />
+            </div>
           </TabsContent>
 
           <TabsContent value="banks">

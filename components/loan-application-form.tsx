@@ -10,6 +10,15 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+} from "@/components/ui/command"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { cn } from "@/lib/utils"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { CheckCircle, AlertTriangle, Search } from "lucide-react"
 
@@ -51,6 +60,8 @@ export function LoanApplicationForm({ user }: LoanApplicationFormProps) {
   const [address, setAddress] = useState("")
   const [selectedBank, setSelectedBank] = useState("")
   const [selectedBranch, setSelectedBranch] = useState("")
+  const [openBank, setOpenBank] = useState(false)
+  const [openBranch, setOpenBranch] = useState(false)
   const [description, setDescription] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isSubmitted, setIsSubmitted] = useState(false)
@@ -94,9 +105,8 @@ export function LoanApplicationForm({ user }: LoanApplicationFormProps) {
   }, [selectedBank])
 
   const selectedBankData = banks.find((bank) => bank._id === selectedBank)
-  const filteredBanks = banks.filter((bank) => bank.name.toLowerCase().includes(bankSearchQuery.toLowerCase()))
-  const filteredBranches =
-    branches.filter((b) => (b.name || b.code || "").toLowerCase().includes(branchSearchQuery.toLowerCase())) || []
+  const filteredBanks = banks // command handles filtering automatically
+  const filteredBranches = branches
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -225,74 +235,91 @@ export function LoanApplicationForm({ user }: LoanApplicationFormProps) {
             />
           </div>
 
-          {/* Bank Selection with Search */}
+          {/* Bank Selection (Searchable Combobox) */}
           <div className="space-y-2">
             <Label className="text-base font-semibold">Select Bank *</Label>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-              <Input
-                placeholder="Search banks..."
-                value={bankSearchQuery}
-                onChange={(e) => setBankSearchQuery(e.target.value)}
-                className="pl-10 mb-2"
-              />
-            </div>
-            <Select value={selectedBank} onValueChange={setSelectedBank} required>
-              <SelectTrigger>
-                <SelectValue placeholder="Choose a bank" />
-              </SelectTrigger>
-              <SelectContent>
-                {filteredBanks.length === 0 ? (
-                  <div className="p-2 text-sm text-muted-foreground">
-                    {bankSearchQuery ? `No banks found matching "${bankSearchQuery}"` : "No banks available"}
-                  </div>
-                ) : (
-                  filteredBanks.map((bank) => (
-                    <SelectItem key={bank._id} value={bank._id}>
-                      {bank.name}
-                    </SelectItem>
-                  ))
-                )}
-              </SelectContent>
-            </Select>
+            <Popover open={openBank} onOpenChange={setOpenBank}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={openBank}
+                  className="w-full justify-between"
+                >
+                  {selectedBankData ? selectedBankData.name : "Choose a bank"}
+                  <Search className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                <Command filter={(value, search) => value.toLowerCase().includes(search.toLowerCase()) ? 1 : 0}>
+                  <CommandInput placeholder="Search bank..." />
+                  <CommandEmpty>No bank found.</CommandEmpty>
+                  <CommandGroup>
+                    {filteredBanks.map(bank => (
+                      <CommandItem
+                        key={bank._id}
+                        value={bank.name}
+                        onSelect={() => {
+                          setSelectedBank(bank._id)
+                          setOpenBank(false)
+                        }}
+                      >
+                        <span className={cn("truncate", bank._id === selectedBank && "font-semibold")}>{bank.name}</span>
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </Command>
+              </PopoverContent>
+            </Popover>
+            <input type="hidden" name="bankId" value={selectedBank} required />
           </div>
 
-          {/* Branch Selection with Search */}
+          {/* Branch Selection (Searchable Combobox) */}
           <div className="space-y-2">
             <Label className="text-base font-semibold">Select Branch *</Label>
-            {selectedBank && (
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-                <Input
-                  placeholder="Search branches..."
-                  value={branchSearchQuery}
-                  onChange={(e) => setBranchSearchQuery(e.target.value)}
-                  className="pl-10 mb-2"
-                />
-              </div>
-            )}
-            <Select value={selectedBranch} onValueChange={setSelectedBranch} disabled={!selectedBank} required>
-              <SelectTrigger>
-                <SelectValue placeholder={selectedBank ? "Choose a branch" : "Select a bank first"} />
-              </SelectTrigger>
-              <SelectContent>
-                {!selectedBank ? (
-                  <div className="p-2 text-sm text-muted-foreground">Select a bank first</div>
-                ) : filteredBranches.length === 0 ? (
-                  <div className="p-2 text-sm text-muted-foreground">
-                    {branchSearchQuery
-                      ? `No branches found matching "${branchSearchQuery}"`
-                      : "No branches available for this bank"}
-                  </div>
+            <Popover open={openBranch} onOpenChange={setOpenBranch}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={openBranch}
+                  disabled={!selectedBank}
+                  className="w-full justify-between disabled:opacity-50"
+                >
+                  {selectedBranch
+                    ? (filteredBranches.find(b => b._id === selectedBranch)?.name || filteredBranches.find(b => b._id === selectedBranch)?.code)
+                    : selectedBank ? "Choose a branch" : "Select a bank first"}
+                  <Search className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                {selectedBank ? (
+                  <Command filter={(value, search) => value.toLowerCase().includes(search.toLowerCase()) ? 1 : 0}>
+                    <CommandInput placeholder="Search branch..." />
+                    <CommandEmpty>No branch found.</CommandEmpty>
+                    <CommandGroup>
+                      {filteredBranches.map(branch => (
+                        <CommandItem
+                          key={branch._id}
+                          value={branch.name || branch.code || branch._id}
+                          onSelect={() => {
+                            setSelectedBranch(branch._id)
+                            setOpenBranch(false)
+                          }}
+                        >
+                          <span className={cn("truncate", branch._id === selectedBranch && "font-semibold")}>{branch.name || branch.code || branch._id}</span>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </Command>
                 ) : (
-                  filteredBranches.map((branch) => (
-                    <SelectItem key={branch._id} value={branch._id}>
-                      {branch.name || branch.code}
-                    </SelectItem>
-                  ))
+                  <div className="p-2 text-sm text-muted-foreground">Select a bank first</div>
                 )}
-              </SelectContent>
-            </Select>
+              </PopoverContent>
+            </Popover>
+            <input type="hidden" name="branchId" value={selectedBranch} required />
           </div>
 
           {/* Description */}

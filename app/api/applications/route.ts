@@ -40,19 +40,14 @@ export async function POST(req: Request) {
     
     // Handle departmentId - it comes as a buffer object from JWT
     let deptId = null
-    if (token!.departmentId) {
-      if (token!.departmentId instanceof ObjectId) {
-        deptId = token!.departmentId
-      } else if (typeof token!.departmentId === 'string') {
-        deptId = new ObjectId(token!.departmentId)
-      } else if (token!.departmentId.buffer) {
-        // Convert buffer back to ObjectId
-        const bufferArray = Object.values(token!.departmentId.buffer) as number[]
-        deptId = new ObjectId(Buffer.from(bufferArray))
-      } else {
-        deptId = new ObjectId(token!.departmentId.toString())
+    const rawDept: any = (token as any).departmentId
+    try {
+      if (rawDept) {
+        if (rawDept instanceof ObjectId) deptId = rawDept
+        else if (typeof rawDept === 'string') deptId = new ObjectId(rawDept)
+        else if (rawDept?.toString) deptId = new ObjectId(rawDept.toString())
       }
-    }
+    } catch {}
     
     const doc = {
       type,
@@ -71,9 +66,9 @@ export async function POST(req: Request) {
     
     const res = await applications.insertOne(doc)
     return NextResponse.json({ ok: true, id: res.insertedId })
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error in POST /api/applications:', error)
-    return NextResponse.json({ error: error.message || "Server error" }, { status: 500 })
+    return NextResponse.json({ error: error?.message || "Server error" }, { status: 500 })
   }
 }
 
@@ -86,14 +81,38 @@ export async function PATCH(req: Request) {
   const { applications } = await collections()
   const _id = new ObjectId(id)
 
+  // Fetch current status to validate transitions
+  const doc = await applications.findOne({ _id }, { projection: { status: 1 } })
+  if (!doc) return NextResponse.json({ error: "Application not found" }, { status: 404 })
+
+  const currentStatus = doc.status as string
+
   if (action === "approve" || action === "reject") {
     requireRole(token, ["admin"])
+    if (currentStatus !== "submitted") {
+      return NextResponse.json({ error: `Cannot ${action} from status ${currentStatus}` }, { status: 400 })
+    }
     const status = action === "approve" ? "approved" : "rejected"
     await applications.updateOne(
-      { _id },
+      { _id, status: currentStatus },
       {
         $set: { status },
-        $push: { history: { at: new Date(), by: token!.username, action, reason: reason || "" } },
+        $push: { history: { at: new Date(), by: token!.username, action, reason: reason || "" } as any },
+      },
+    )
+    return NextResponse.json({ ok: true })
+  }
+
+  if (action === "sanction") {
+    requireRole(token, ["branch"])
+    if (currentStatus !== "approved") {
+      return NextResponse.json({ error: `Cannot sanction from status ${currentStatus}` }, { status: 400 })
+    }
+    await applications.updateOne(
+      { _id, status: currentStatus },
+      {
+        $set: { status: "sanctioned" },
+        $push: { history: { at: new Date(), by: token!.username, action } as any },
       },
     )
     return NextResponse.json({ ok: true })
@@ -101,11 +120,14 @@ export async function PATCH(req: Request) {
 
   if (action === "disburse") {
     requireRole(token, ["branch"])
+    if (currentStatus !== "sanctioned") {
+      return NextResponse.json({ error: `Cannot disburse from status ${currentStatus}` }, { status: 400 })
+    }
     await applications.updateOne(
-      { _id, status: "approved" },
+      { _id, status: currentStatus },
       {
         $set: { status: "disbursed", disbursementRef: disbursementRef || null },
-        $push: { history: { at: new Date(), by: token!.username, action, disbursementRef: disbursementRef || "" } },
+        $push: { history: { at: new Date(), by: token!.username, action, disbursementRef: disbursementRef || "" } as any },
       },
     )
     return NextResponse.json({ ok: true })
